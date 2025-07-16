@@ -1,126 +1,170 @@
-version: "3.9"
+version: "3.8"
 
 networks:
   pipeline-net:
     driver: bridge
 
 volumes:
-  esdata: {}
-  kafkadata: {}
+  esdata:
+  kafkadata:
+  airflow-db:
+  zookeeper_data:
+  zookeeper_log:
 
 services:
-  # ───────────────────────── Kafka & ZooKeeper (Confluent 7.6.2) ─────────────────────────
+  # ───────────────────────── Kafka & ZooKeeper (Confluent 7.3.0) ─────────────────────────
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.2
+    image: confluentinc/cp-zookeeper:7.3.0
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
       ALLOW_ANONYMOUS_LOGIN: "yes"
-    networks: [pipeline-net]
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: echo srvr | nc zookeeper 2181 || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - pipeline-net
 
   kafka:
-    image: confluentinc/cp-kafka:7.6.2
+    image: confluentinc/cp-kafka:7.3.0
     container_name: kafka
-    depends_on: [zookeeper]
+    depends_on:
+      zookeeper:
+        condition: service_healthy
     volumes:
       - kafkadata:/var/lib/kafka/data
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: |
-        PLAINTEXT://kafka:29092,
-        PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1   # 단일 브로커 DEV
-      CONFLUENT_METRICS_ENABLE: "false"           # 간단히 끔
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "9092:9092"   # 호스트 ↔ 컨테이너
       - "29092:29092" # 내부 Docker용
-    networks: [pipeline-net]
+    healthcheck:
+      test: kafka-topics --bootstrap-server kafka:29092 --list || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - pipeline-net
 
-  # ───────── Elasticsearch·Kibana 8.13.0 (변경 없음) ─────────
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
-    container_name: es
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
     environment:
-      discovery.type: single-node
-      ES_JAVA_OPTS: -Xms1g -Xmx1g
-      bootstrap.memory_lock: "true"
-    ulimits:
-      memlock: { soft: -1, hard: -1 }
-    volumes: [esdata:/usr/share/elasticsearch/data]
-    ports: ["9200:9200"]
-    networks: [pipeline-net]
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - pipeline-net
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.13.0
-    container_name: kibana
-    environment:
-      ELASTICSEARCH_HOSTS: http://es:9200
-    depends_on: [elasticsearch]
-    ports: ["5601:5601"]
-    networks: [pipeline-net]
+  # # ───────── Elasticsearch·Kibana 8.13.0 (변경 없음) ─────────
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+  #   container_name: es
+  #   environment:
+  #     discovery.type: single-node
+  #     ES_JAVA_OPTS: -Xms1g -Xmx1g
+  #     bootstrap.memory_lock: "true"
+  #   ulimits:
+  #     memlock: { soft: -1, hard: -1 }
+  #   volumes: [esdata:/usr/share/elasticsearch/data]
+  #   ports: ["9200:9200"]
+  #   networks: [pipeline-net]
+
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.13.0
+  #   container_name: kibana
+  #   environment:
+  #     ELASTICSEARCH_HOSTS: http://es:9200
+  #   depends_on: [elasticsearch]
+  #   ports: ["5601:5601"]
+  #   networks: [pipeline-net]
 
   # ───────── Logstash, Spark, Airflow, Grafana (변경 없음) ─────────
   logstash:
     image: docker.elastic.co/logstash/logstash:8.13.0
     container_name: logstash
     volumes:
-      - ../configs/logstash/dev.conf:/usr/share/logstash/pipeline/dev.conf:ro
+      - ./data:/data                # 호스트의 로그 디렉토리 마운트
+      - ./pipeline/:/usr/share/logstash/pipeline/
     depends_on: [kafka]
-    networks: [pipeline-net]
+    networks:
+      - pipeline-net
 
-  spark:
-    image: bitnami/spark:3.5.6
-    container_name: spark
-    environment:
-      SPARK_MODE: master
-    ports: ["8080:8080"]
-    networks: [pipeline-net]
+  # spark:
+  #   image: bitnami/spark:3.5.6
+  #   container_name: spark
+  #   environment:
+  #     SPARK_MODE: master
+  #   ports: ["8080:8080"]
+  #   networks:
+  #     - pipeline-net
 
-  airflow-db:
-    image: postgres:16
-    container_name: airflow-db
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-    volumes: [airflow-db:/var/lib/postgresql/data]
-    networks: [pipeline-net]
+  # airflow-db:
+  #   image: postgres:16
+  #   container_name: airflow-db
+  #   environment:
+  #     POSTGRES_USER: airflow
+  #     POSTGRES_PASSWORD: airflow
+  #     POSTGRES_DB: airflow
+  #   volumes: [airflow-db:/var/lib/postgresql/data]
+  #   networks:
+  #     - pipeline-net
 
-  airflow-web:
-    build:
-      context: ./docker/airflow
-    container_name: airflow-web
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    depends_on: [airflow-db]
-    ports: ["8081:8080"]
-    networks: [pipeline-net]
+  # airflow-web:
+  #   build:
+  #     context: ./docker/airflow
+  #   container_name: airflow-web
+  #   environment:
+  #     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  #     AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+  #     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  #   depends_on: [airflow-db]
+  #   ports: ["8081:8080"]
+  #   networks:
+  #     - pipeline-net
 
-  airflow-scheduler:
-    build:
-      context: ./docker/airflow      # ← 같은 이미지 재사용
-    container_name: airflow-scheduler
-    command: scheduler
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    depends_on: [airflow-web]
-    networks: [pipeline-net]
+  # airflow-scheduler:
+  #   build:
+  #     context: ./docker/airflow      # ← 같은 이미지 재사용
+  #   container_name: airflow-scheduler
+  #   command: scheduler
+  #   environment:
+  #     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  #     AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+  #     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  #   depends_on: [airflow-web]
+  #   networks:
+  #     - pipeline-net
 
-  grafana:
-    image: grafana/grafana:11.0.0
-    container_name: grafana
-    environment:
-      GF_INSTALL_PLUGINS: grafana-elasticsearch-datasource
-    ports: ["3000:3000"]
-    networks: [pipeline-net]
+  # grafana:
+  #   image: grafana/grafana:11.0.0
+  #   container_name: grafana
+  #   environment:
+  #     GF_INSTALL_PLUGINS: grafana-elasticsearch-datasource
+  #   ports: ["3000:3000"]
+  #   networks:
+  #     - pipeline-net
 
 
 
