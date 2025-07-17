@@ -1,4 +1,4 @@
-version: "3.8"
+version: "3.9"
 
 networks:
   pipeline-net:
@@ -77,7 +77,7 @@ services:
     networks:
       - pipeline-net
 
-  # # ───────── Elasticsearch·Kibana 8.13.0 (변경 없음) ─────────
+  # # ───────── Elasticsearch·Logstash·Kibana 8.13.0 ─────────
   # elasticsearch:
   #   image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
   #   container_name: es
@@ -85,38 +85,86 @@ services:
   #     discovery.type: single-node
   #     ES_JAVA_OPTS: -Xms1g -Xmx1g
   #     bootstrap.memory_lock: "true"
+  #     # 보안 활성화 (기본값)
+  #     xpack.security.enabled: "true"
+  #     # 초기 사용자 설정
+  #     ELASTIC_PASSWORD: "elastic123"
   #   ulimits:
   #     memlock: { soft: -1, hard: -1 }
-  #   volumes: [esdata:/usr/share/elasticsearch/data]
-  #   ports: ["9200:9200"]
-  #   networks: [pipeline-net]
-
-  # kibana:
-  #   image: docker.elastic.co/kibana/kibana:8.13.0
-  #   container_name: kibana
-  #   environment:
-  #     ELASTICSEARCH_HOSTS: http://es:9200
-  #   depends_on: [elasticsearch]
-  #   ports: ["5601:5601"]
-  #   networks: [pipeline-net]
-
-  # ───────── Logstash, Spark, Airflow, Grafana (변경 없음) ─────────
+  #   volumes:
+  #     - esdata:/usr/share/elasticsearch/data
+  #   ports:
+  #     - "9200:9200"
+  #   networks:
+  #     - pipeline-net
+  
   logstash:
     image: docker.elastic.co/logstash/logstash:8.13.0
     container_name: logstash
     volumes:
       - ./data:/data                # 호스트의 로그 디렉토리 마운트
       - ./pipeline/:/usr/share/logstash/pipeline/
-    depends_on: [kafka]
+    depends_on: 
+      - kafka
     networks:
       - pipeline-net
 
-  # spark:
-  #   image: bitnami/spark:3.5.6
-  #   container_name: spark
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.13.0
+  #   container_name: kibana
   #   environment:
-  #     SPARK_MODE: master
-  #   ports: ["8080:8080"]
+  #     ELASTICSEARCH_HOSTS: http://es:9200
+  #   depends_on:
+  #     - elasticsearch
+  #   ports:
+  #     - "5601:5601"
+  #   networks:
+  #     - pipeline-net
+
+  # # ───────── Spark, Airflow, Grafana ─────────
+  # spark-master:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.spark
+  #   container_name: spark-master
+  #   hostname: spark-master
+  #   ports:
+  #     - "8090:8080"  # 웹 UI
+  #     - "7077:7077"  # 마스터 포트
+  #   environment:
+  #     - SPARK_MODE=master
+  #     - SPARK_RPC_AUTHENTICATION_ENABLED=no
+  #     - SPARK_RPC_ENCRYPTION_ENABLED=no
+  #     - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+  #     - SPARK_SSL_ENABLED=no
+  #     - SPARK_USER=spark
+  #     - HOME=/opt/bitnami/spark
+  #   volumes:
+  #     - ./:/opt/bitnami/spark/work
+  #   networks:
+  #     - pipeline-net
+  # spark-worker-1:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.spark
+  #   container_name: spark-worker-1
+  #   depends_on:
+  #     - spark-master
+  #   ports:
+  #     - "8091:8081"  # 워커 웹 UI
+  #   environment:
+  #     - SPARK_MODE=worker
+  #     - SPARK_MASTER_URL=spark://spark-master:7077
+  #     - SPARK_WORKER_MEMORY=2G
+  #     - SPARK_WORKER_CORES=2
+  #     - SPARK_RPC_AUTHENTICATION_ENABLED=no
+  #     - SPARK_RPC_ENCRYPTION_ENABLED=no
+  #     - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+  #     - SPARK_SSL_ENABLED=no
+  #     - SPARK_USER=spark
+  #     - HOME=/opt/bitnami/spark
+  #   volumes:
+  #     - ./:/opt/bitnami/spark/work
   #   networks:
   #     - pipeline-net
 
