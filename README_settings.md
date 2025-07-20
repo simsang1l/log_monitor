@@ -77,12 +77,17 @@
 # Kafka 설정
 1. Kafka 토픽 생성
     ```bash
-    docker exec -it kafka kafka-topics --create --topic ssh-log --bootstrap-server kafka:29092
+    docker exec -it kafka1 kafka-topics --create --topic ssh-log --bootstrap-server kafka1:29092 --partitions 3 --replication-factor 3
     ```
 
 2. Kafka 토픽 확인
     ```bash
-    docker exec -it kafka kafka-topics --list --bootstrap-server kafka:29092
+    docker exec -it kafka1 kafka-topics --list --bootstrap-server kafka1:29092
+    ```
+
+    ```bash
+    # 토픽 삭제
+    docker exec -it kafka1 kafka-topics --delete --topic ssh-log --bootstrap-server kafka1:29092
     ```
 
 3. 토픽 메시지 개수 확인

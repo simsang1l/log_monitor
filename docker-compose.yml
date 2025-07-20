@@ -6,7 +6,9 @@ networks:
 
 volumes:
   esdata:
-  kafkadata:
+  kafka1_data:
+  kafka2_data:
+  kafka3_data:
   airflow-db:
   zookeeper_data:
   zookeeper_log:
@@ -32,29 +34,96 @@ services:
     networks:
       - pipeline-net
 
-  kafka:
+  kafka1:
     image: confluentinc/cp-kafka:7.3.0
-    container_name: kafka
+    container_name: kafka1
     depends_on:
       zookeeper:
         condition: service_healthy
     volumes:
-      - kafkadata:/var/lib/kafka/data
+      - kafka1_data:/var/lib/kafka/data
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka1:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
     ports:
-      - "9092:9092"   # 호스트 ↔ 컨테이너
-      - "29092:29092" # 내부 Docker용
+      - "9092:9092"
+      - "29092:29092"
     healthcheck:
-      test: kafka-topics --bootstrap-server kafka:29092 --list || exit 1
+      test: kafka-topics --bootstrap-server kafka1:29092 --list || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - pipeline-net
+
+  kafka2:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka2
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+      kafka1:
+        condition: service_healthy
+    volumes:
+      - kafka2_data:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka2:29093,PLAINTEXT_HOST://localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9093:9093"
+      - "29093:29093"
+    healthcheck:
+      test: kafka-topics --bootstrap-server kafka2:29093 --list || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - pipeline-net
+
+  kafka3:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka3
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+      kafka1:
+        condition: service_healthy
+    volumes:
+      - kafka3_data:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka3:29094,PLAINTEXT_HOST://localhost:9094
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9094:9094"
+      - "29094:29094"
+    healthcheck:
+      test: kafka-topics --bootstrap-server kafka3:29094 --list || exit 1
       interval: 30s
       timeout: 10s
       retries: 3
@@ -66,13 +135,14 @@ services:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui
     depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
+      - kafka1
+      - kafka2
+      - kafka3  
+    ports:  
       - "8080:8080"
     environment:
-      KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_NAME: multi-broker-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:29092,kafka2:29093,kafka3:29094
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
     networks:
       - pipeline-net
@@ -105,7 +175,9 @@ services:
       - ./data:/data                # 호스트의 로그 디렉토리 마운트
       - ./pipeline/:/usr/share/logstash/pipeline/
     depends_on: 
-      - kafka
+      - kafka1
+      - kafka2
+      - kafka3
     networks:
       - pipeline-net
 
