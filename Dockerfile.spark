@@ -1,0 +1,31 @@
+# Dockerfile.spark
+FROM bitnami/spark:3.5.6
+
+USER root
+
+# 필요한 패키지 설치
+RUN apt-get update && apt-get install -y \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# spark 사용자 생성 및 설정
+RUN useradd -m -s /bin/bash spark && \
+    echo "spark ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    mkdir -p /opt/bitnami/spark/logs && \
+    chown -R spark:spark /opt/bitnami/spark
+
+# 작업 디렉토리 설정
+RUN mkdir -p /opt/bitnami/spark/work && \
+    chown -R spark:spark /opt/bitnami/spark/work
+
+# spark 사용자로 전환
+USER spark
+
+# 환경 변수 설정
+ENV USER=spark
+ENV HOME=/opt/bitnami/spark
+ENV HADOOP_HOME=/opt/bitnami/spark
+ENV JAVA_HOME=/opt/bitnami/java
+
+# 작업 디렉토리 설정
+WORKDIR /opt/bitnami/spark/work
