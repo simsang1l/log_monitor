@@ -100,5 +100,14 @@
         ```bash
         http://localhost:8080
         ```
-    
-    
+
+# elasticsearch 설정
+1. elasticsearch 인덱스 삭제
+    ```bash
+    curl -X DELETE "http://localhost:9200/ssh-log"
+    ```
+
+2. elasticsearch 인덱스 확인
+    ```bash
+    curl -X GET "http://localhost:9200/_cat/indices"
+    ```

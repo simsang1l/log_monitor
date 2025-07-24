@@ -27,10 +27,16 @@ def create_schema():
     logger.info("로그 데이터 스키마를 정의합니다...")
     return StructType([
         StructField("@timestamp", StringType(), True),
+        StructField("event_time", StringType(), True),
         StructField("source_path", StringType(), True),
         StructField("message", StringType(), True),
         StructField("source_file", StringType(), True),
-        StructField("log_type", StringType(), True)
+        StructField("log_type", StringType(), True),
+        StructField("error_type", StringType(), True),
+        StructField("user", StringType(), True),
+        StructField("ip", StringType(), True),
+        StructField("port", StringType(), True),
+
     ])
 
 def process_kafka_stream(spark, schema):
@@ -42,7 +48,7 @@ def process_kafka_stream(spark, schema):
         .format("kafka") \
         .option("kafka.bootstrap.servers", "kafka1:29092,kafka2:29093,kafka3:29094") \
         .option("subscribe", "ssh-log") \
-        .option("startingOffsets", "earliest") \
+        .option("startingOffsets", "latest") \
         .option("failOnDataLoss", "false") \
         .load()
     
@@ -77,10 +83,10 @@ def process_kafka_stream(spark, schema):
         .when(lower(col("message")).contains("accepted password"), "login success")
         .when(lower(col("message")).contains("connection closed"), "connection closed")
         .otherwise("etc")
-    )\
-    .withColumn("user", regexp_extract(col("message"), r"user ([^ ]+)", 1)) \
+    ).withColumn("user", regexp_extract(col("message"), r"user ([^ ]+)", 1)) \
     .withColumn("ip", regexp_extract(col("message"), r"from ([0-9.]+)", 1)) \
-    .withColumn("port", regexp_extract(col("message"), r"port ([0-9]+)", 1))
+    .withColumn("port", regexp_extract(col("message"), r"port ([0-9]+)", 1)) \
+    .withColumn("event_time", to_timestamp(col("event_time")))
     
     # null 값 처리
     processed_df = processed_df.na.fill({
@@ -109,6 +115,8 @@ def save_to_elasticsearch(df, index_name):
         .option("es.net.http.auth.pass", "elastic123") \
         .option("es.index.auto.create", "true") \
         .option("es.mapping.date.rich", "false") \
+        .option("es.net.ssl", "false") \
+        .option("es.batch.size.entries", "10") \
         .option("checkpointLocation", f"/tmp/checkpoint/{index_name}") \
         .outputMode("append") \
         .trigger(processingTime="10 seconds") \
