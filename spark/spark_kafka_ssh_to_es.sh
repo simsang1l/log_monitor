@@ -14,6 +14,8 @@ docker exec -it spark-master spark-submit \
     --conf "spark.sql.adaptive.coalescePartitions.enabled=true" \
     --conf "spark.executor.memory=2g" \
     --conf "spark.driver.memory=2g" \
+    --executor-cores 2 \
+    --num-executors 2 \
     /opt/bitnami/spark/work/spark/kafka_to_elasticsearch.py
 
 echo "Spark 애플리케이션이 종료되었습니다." 

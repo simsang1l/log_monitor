@@ -27,7 +27,7 @@ def create_schema():
     logger.info("로그 데이터 스키마를 정의합니다...")
     return StructType([
         StructField("@timestamp", StringType(), True),
-        StructField("event_time", StringType(), True),
+        StructField("event_time", TimestampType(), True),
         StructField("source_path", StringType(), True),
         StructField("message", StringType(), True),
         StructField("source_file", StringType(), True),
@@ -63,12 +63,6 @@ def process_kafka_stream(spark, schema):
     processed_df = parsed_df.withColumn(
         "timestamp", 
         to_timestamp(col("@timestamp"))
-    ).withColumn(
-        "date", 
-        date_format(col("timestamp"), "yyyy-MM-dd")
-    ).withColumn(
-        "hour", 
-        hour(col("timestamp"))
     ).withColumn(
         "log_level", 
         when(lower(col("message")).contains("failed"), "ERROR")
@@ -109,14 +103,14 @@ def save_to_elasticsearch(df, index_name):
         .option("es.nodes", "es") \
         .option("es.port", "9200") \
         .option("es.resource", index_name) \
-        .option("es.mapping.id", "timestamp") \
+        .option("es.mapping.id", "row_hash") \
         .option("es.nodes.wan.only", "true") \
         .option("es.net.http.auth.user", "elastic") \
         .option("es.net.http.auth.pass", "elastic123") \
         .option("es.index.auto.create", "true") \
-        .option("es.mapping.date.rich", "false") \
+        .option("es.mapping.date.rich", "true") \
         .option("es.net.ssl", "false") \
-        .option("es.batch.size.entries", "10") \
+        .option("es.batch.size.entries", "20") \
         .option("checkpointLocation", f"/tmp/checkpoint/{index_name}") \
         .outputMode("append") \
         .trigger(processingTime="10 seconds") \
