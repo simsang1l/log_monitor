@@ -111,3 +111,13 @@
     ```bash
     curl -X GET "http://localhost:9200/_cat/indices"
     ```
+
+3. elasticsearch 테이블 확인
+    ```bash
+    curl -X GET "http://localhost:9200/ssh-log/_mapping"
+    ```
+
+4. elasticsearch 데이터 확인
+    ```bash
+    curl -X GET "http://localhost:9200/ssh-log/_search?pretty"
+    ```

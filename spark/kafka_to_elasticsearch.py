@@ -114,7 +114,7 @@ def save_to_elasticsearch(df, index_name):
         .option("es.net.http.auth.user", "elastic") \
         .option("es.net.http.auth.pass", "elastic123") \
         .option("es.index.auto.create", "true") \
-        .option("es.mapping.date.rich", "false") \
+        .option("es.mapping.date.rich", "true") \
         .option("es.net.ssl", "false") \
         .option("es.batch.size.entries", "10") \
         .option("checkpointLocation", f"/tmp/checkpoint/{index_name}") \
