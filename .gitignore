@@ -1,1 +1,36 @@
 *.log
+
+# 설정 파일 (실제 값이 포함된 파일들)
+configs/config.env
+configs/*.key
+configs/*.pem
+configs/secrets/
+
+# 로그 파일
+airflow/logs/
+*.log
+
+# 임시 파일
+/tmp/
+*.tmp
+*.temp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

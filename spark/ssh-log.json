@@ -17,8 +17,20 @@
             }
           }
         },
-        "hour": {
+        "event_time": {
+          "type": "date"
+        },
+        "event_time_kst_iso": {
           "type": "long"
+        },
+        "host_name": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 256
+            }
+          }
         },
         "ip": {
           "type": "text",
@@ -56,6 +68,9 @@
             }
           }
         },
+        "msg": {
+          "type": "text"
+        },
         "port": {
           "type": "text",
           "fields": {
@@ -65,26 +80,14 @@
             }
           }
         },
+        "row_hash": {
+          "type": "keyword"
+        },
         "source_file": {
-          "type": "text",
-          "fields": {
-            "keyword": {
-              "type": "keyword",
-              "ignore_above": 256
-            }
-          }
+          "type": "keyword"
         },
         "source_path": {
-          "type": "text",
-          "fields": {
-            "keyword": {
-              "type": "keyword",
-              "ignore_above": 256
-            }
-          }
-        },
-        "timestamp": {
-          "type": "long"
+          "type": "keyword"
         },
         "user": {
           "type": "text",

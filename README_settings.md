@@ -102,6 +102,14 @@
         ```
 
 # elasticsearch 설정
+1. 라이센스 확인
+    ```bash
+    curl -X GET "http://localhost:9200/_license?pretty"
+    ```
+
+2. 라이센스 설정
+    ```bash
+
 1. elasticsearch 인덱스 삭제
     ```bash
     curl -X DELETE "http://localhost:9200/ssh-log"
@@ -121,3 +129,13 @@
     ```bash
     curl -X GET "http://localhost:9200/ssh-log/_search?pretty"
     ```
+    ``` bash
+    # 데이터 건수 확인
+    curl -X GET "http://localhost:9200/ssh-log/_count"
+    ```
+
+5. elasticsearch 데이터 삭제
+    ```bash
+    curl -X DELETE "http://localhost:9200/ssh-log"
+    ```
+

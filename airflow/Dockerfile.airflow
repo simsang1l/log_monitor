@@ -1,0 +1,29 @@
+FROM apache/airflow:2.10.5
+
+# airflow 사용자에 docker 그룹만 추가
+USER root
+RUN apt-get update && apt-get install -y docker.io \
+    && groupadd -g 999 docker || true \
+    && usermod -aG docker airflow
+
+# 로그 디렉토리 권한 설정
+RUN mkdir -p /opt/airflow/logs \
+    && chown -R airflow:root /opt/airflow/logs \
+    && chmod -R 775 /opt/airflow/logs
+
+USER airflow
+# Python 패키지 설치
+RUN pip install --no-cache-dir \
+    elasticsearch==8.13.0 \
+    pandas==2.1.4 \
+    matplotlib==3.8.2 \
+    seaborn==0.13.0 \
+    plotly==5.17.0 \
+    jinja2==3.1.2 \
+    python-dateutil==2.8.2 \
+    openpyxl==3.1.2 \
+    xlsxwriter==3.1.9 \
+    fpdf2==2.7.8 \
+    reportlab==4.0.7
+
+

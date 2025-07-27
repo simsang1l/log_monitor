@@ -14,12 +14,22 @@ def create_spark_session():
     logger.info("Spark 세션을 생성합니다...")
     return SparkSession.builder \
         .appName("KafkaToElasticsearch") \
-        .config("spark.jars.packages", 
-                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.6," +
-                "org.elasticsearch:elasticsearch-spark-30_2.12:8.13.0") \
-        .config("spark.sql.streaming.checkpointLocation", "/tmp/checkpoint") \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+        .config("spark.sql.adaptive.skewJoin.enabled", "true") \
+        .config("spark.sql.adaptive.localShuffleReader.enabled", "true") \
+        .config("spark.sql.shuffle.partitions", "1") \
+        .config("spark.default.parallelism", "1") \
+        .config("spark.sql.adaptive.advisoryPartitionSizeInBytes", "32MB") \
+        .config("spark.sql.adaptive.coalescePartitions.minPartitionNum", "1") \
+        .config("spark.sql.adaptive.coalescePartitions.initialPartitionNum", "1") \
+        .config("spark.sql.streaming.statefulOperator.checkCorrectness.enabled", "false") \
+        .config("spark.sql.streaming.unsupportedOperationCheck.enabled", "false") \
+        .config("spark.sql.adaptive.autoBroadcastJoinThreshold", "10MB") \
+        .config("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "256MB") \
+        .config("spark.sql.adaptive.skewJoin.skewedPartitionFactor", "5") \
+        .config("spark.sql.adaptive.coalescePartitions.parallelismFirst", "false") \
+        .config("spark.sql.adaptive.coalescePartitions.minPartitionSize", "1MB") \
         .getOrCreate()
 
 def create_schema():
@@ -27,16 +37,19 @@ def create_schema():
     logger.info("로그 데이터 스키마를 정의합니다...")
     return StructType([
         StructField("@timestamp", StringType(), True),
+        StructField("host_name", StringType(), True),
+        StructField("row_hash", StringType(), True),
         StructField("event_time", StringType(), True),
+        StructField("event_time_kst_iso", StringType(), True),
         StructField("source_path", StringType(), True),
-        StructField("message", StringType(), True),
         StructField("source_file", StringType(), True),
+        StructField("message", StringType(), True),
         StructField("log_type", StringType(), True),
+        StructField("log_level", StringType(), True),
         StructField("error_type", StringType(), True),
         StructField("user", StringType(), True),
         StructField("ip", StringType(), True),
         StructField("port", StringType(), True),
-
     ])
 
 def process_kafka_stream(spark, schema):
@@ -48,8 +61,12 @@ def process_kafka_stream(spark, schema):
         .format("kafka") \
         .option("kafka.bootstrap.servers", "kafka1:29092,kafka2:29093,kafka3:29094") \
         .option("subscribe", "ssh-log") \
-        .option("startingOffsets", "latest") \
+        .option("startingOffsets", "earliest") \
         .option("failOnDataLoss", "false") \
+        .option("maxOffsetsPerTrigger", "50") \
+        .option("kafka.max.poll.records", "10") \
+        .option("kafka.fetch.min.bytes", "1") \
+        .option("kafka.fetch.max.wait.ms", "500") \
         .load()
     
     logger.info("Kafka에서 데이터를 읽기 시작했습니다.")
@@ -61,20 +78,18 @@ def process_kafka_stream(spark, schema):
     
     # 타임스탬프 변환 및 데이터 정제
     processed_df = parsed_df.withColumn(
-        "timestamp", 
+        "@timestamp", 
         to_timestamp(col("@timestamp"))
     ).withColumn(
-        "date", 
-        date_format(col("timestamp"), "yyyy-MM-dd")
+        "event_time", 
+        to_timestamp(col("event_time"))
     ).withColumn(
-        "hour", 
-        hour(col("timestamp"))
+        "event_time_kst_iso", 
+        to_timestamp(col("event_time_kst_iso"))
     ).withColumn(
         "log_level", 
         when(lower(col("message")).contains("failed"), "ERROR")
         .when(lower(col("message")).contains("invalid"), "WARN")
-        .when(lower(col("message")).contains("accepted"), "INFO")
-        .when(lower(col("message")).contains("connection closed"), "INFO")
         .otherwise("INFO")
     ).withColumn(
         "error_type",
@@ -86,14 +101,13 @@ def process_kafka_stream(spark, schema):
     ).withColumn("user", regexp_extract(col("message"), r"user ([^ ]+)", 1)) \
     .withColumn("ip", regexp_extract(col("message"), r"from ([0-9.]+)", 1)) \
     .withColumn("port", regexp_extract(col("message"), r"port ([0-9]+)", 1)) \
-    .withColumn("event_time", to_timestamp(col("event_time")))
+    .select(
+        "@timestamp", "host_name", "row_hash", "event_time", "event_time_kst_iso", "source_path", "source_file", "message", "log_type", "log_level", "error_type", "user", "ip", "port"
+    )
     
     # null 값 처리
     processed_df = processed_df.na.fill({
         "message": "",
-        "source_path": "",
-        "source_file": "",
-        "log_type": "ssh",
         "log_level": "INFO"
     })
     
@@ -109,17 +123,19 @@ def save_to_elasticsearch(df, index_name):
         .option("es.nodes", "es") \
         .option("es.port", "9200") \
         .option("es.resource", index_name) \
-        .option("es.mapping.id", "timestamp") \
+        .option("es.mapping.id", "row_hash") \
         .option("es.nodes.wan.only", "true") \
         .option("es.net.http.auth.user", "elastic") \
         .option("es.net.http.auth.pass", "elastic123") \
         .option("es.index.auto.create", "true") \
         .option("es.mapping.date.rich", "true") \
         .option("es.net.ssl", "false") \
-        .option("es.batch.size.entries", "10") \
         .option("checkpointLocation", f"/tmp/checkpoint/{index_name}") \
+        .option("es.batch.size.entries", "10") \
+        .option("es.batch.size.bytes", "1mb") \
+        .option("es.batch.write.refresh", "false") \
         .outputMode("append") \
-        .trigger(processingTime="10 seconds") \
+        .trigger(processingTime="120 seconds") \
         .start()
 
 def main():
