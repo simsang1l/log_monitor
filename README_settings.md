@@ -139,3 +139,10 @@
     curl -X DELETE "http://localhost:9200/ssh-log"
     ```
 
+# airflow 설정
+
+1. 경로 권한 부여
+    ```bash
+    sudo chmod -R 775 airflow/logs
+    sudo chmod -R 775 airflow/dags
+    ```
