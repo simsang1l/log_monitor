@@ -177,9 +177,17 @@ services:
   logstash:
     image: docker.elastic.co/logstash/logstash:8.13.0
     container_name: logstash
+    user: root                     # 퍼미션 이슈 예방
+    environment:
+      - PIPELINE_WORKERS=1
+      - PIPELINE_BATCH_SIZE=50
+      - PIPELINE_BATCH_DELAY=5
+      - LS_JAVA_OPTS=-Xms512m -Xmx512m
     volumes:
       - ./data:/data                # 호스트의 로그 디렉토리 마운트
       - ./pipeline/:/usr/share/logstash/pipeline/
+    ports:
+      - "9600:9600"                # Node stats API → EPS 계산용
     depends_on: 
       - kafka1
       - kafka2
@@ -252,78 +260,78 @@ services:
     networks:
       - pipeline-net
 
-  airflow-db:
-    image: postgres:16
-    container_name: airflow-db
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-    volumes: [airflow-db:/var/lib/postgresql/data]
-    networks:
-      - pipeline-net
+  # airflow-db:
+  #   image: postgres:16
+  #   container_name: airflow-db
+  #   environment:
+  #     POSTGRES_USER: airflow
+  #     POSTGRES_PASSWORD: airflow
+  #     POSTGRES_DB: airflow
+  #   volumes: [airflow-db:/var/lib/postgresql/data]
+  #   networks:
+  #     - pipeline-net
 
-  airflow-init:
-    build:
-      context: ./airflow
-      dockerfile: Dockerfile.airflow
-    container_name: airflow-init
-    depends_on:
-      - airflow-db
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
-      - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      - _AIRFLOW_DB_UPGRADE=true
-      - _AIRFLOW_WWW_USER_CREATE=true
-      - _AIRFLOW_WWW_USER_USERNAME=admin
-      - _AIRFLOW_WWW_USER_PASSWORD=admin
-    command: version
-    networks:
-      - pipeline-net
+  # airflow-init:
+  #   build:
+  #     context: ./airflow
+  #     dockerfile: Dockerfile.airflow
+  #   container_name: airflow-init
+  #   depends_on:
+  #     - airflow-db
+  #   environment:
+  #     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+  #     - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+  #     - AIRFLOW__CORE__LOAD_EXAMPLES=false
+  #     - _AIRFLOW_DB_UPGRADE=true
+  #     - _AIRFLOW_WWW_USER_CREATE=true
+  #     - _AIRFLOW_WWW_USER_USERNAME=admin
+  #     - _AIRFLOW_WWW_USER_PASSWORD=admin
+  #   command: version
+  #   networks:
+  #     - pipeline-net
       
-  airflow-web:
-    build:
-      context: ./airflow
-      dockerfile: Dockerfile.airflow
-    container_name: airflow-web
-    command: webserver
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    env_file:
-      - configs/airflow_config.env
-    depends_on: [airflow-db]
-    ports: ["8081:8080"]
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./utils:/opt/airflow/utils
-    user: "50000:0"
-    networks:
-      - pipeline-net
+  # airflow-web:
+  #   build:
+  #     context: ./airflow
+  #     dockerfile: Dockerfile.airflow
+  #   container_name: airflow-web
+  #   command: webserver
+  #   environment:
+  #     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  #     AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+  #     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  #   env_file:
+  #     - configs/airflow_config.env
+  #   depends_on: [airflow-db]
+  #   ports: ["8081:8080"]
+  #   volumes:
+  #     - ./airflow/dags:/opt/airflow/dags
+  #     - ./airflow/logs:/opt/airflow/logs
+  #     - ./utils:/opt/airflow/utils
+  #   user: "50000:0"
+  #   networks:
+  #     - pipeline-net
 
-  airflow-scheduler:
-    build:
-      context: ./airflow
-      dockerfile: Dockerfile.airflow
-    container_name: airflow-scheduler
-    command: scheduler
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    env_file:
-      - configs/airflow_config.env
-    depends_on: [airflow-web]
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./utils:/opt/airflow/utils
-    user: "50000:0"
-    networks:
-      - pipeline-net
+  # airflow-scheduler:
+  #   build:
+  #     context: ./airflow
+  #     dockerfile: Dockerfile.airflow
+  #   container_name: airflow-scheduler
+  #   command: scheduler
+  #   environment:
+  #     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  #     AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+  #     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  #   env_file:
+  #     - configs/airflow_config.env
+  #   depends_on: [airflow-web]
+  #   volumes:
+  #     - ./airflow/dags:/opt/airflow/dags
+  #     - ./airflow/logs:/opt/airflow/logs
+  #     - ./utils:/opt/airflow/utils
+  #   user: "50000:0"
+  #   networks:
+  #     - pipeline-net
 
   # grafana:
   #   image: grafana/grafana:11.0.0
