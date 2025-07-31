@@ -309,7 +309,10 @@ services:
       - ./airflow/logs:/opt/airflow/logs
       - ./utils:/opt/airflow/utils
       - ./spark:/opt/airflow/spark
+      - /var/run/docker.sock:/var/run/docker.sock
     user: "50000:999"
+    group_add:
+      - "1001" 
     networks:
       - pipeline-net
 
@@ -331,6 +334,9 @@ services:
       - ./airflow/logs:/opt/airflow/logs
       - ./utils:/opt/airflow/utils
       - ./spark:/opt/airflow/spark
+      - /var/run/docker.sock:/var/run/docker.sock
     user: "50000:999"
+    group_add:
+      - "1001" 
     networks:
       - pipeline-net

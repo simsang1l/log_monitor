@@ -4,6 +4,14 @@ from pyspark.sql.types import *
 import json
 import os
 import logging
+import dotenv
+
+dotenv.load_dotenv('/opt/airflow/configs/airflow_config.env')
+
+ES_HOST = os.getenv('ES_HOST')
+ES_PORT = os.getenv('ES_PORT')
+ES_USERNAME = os.getenv('ES_USERNAME')
+ES_PASSWORD = os.getenv('ES_PASSWORD')
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -63,8 +71,8 @@ def process_kafka_stream(spark, schema):
         .option("subscribe", "ssh-log") \
         .option("startingOffsets", "earliest") \
         .option("failOnDataLoss", "false") \
-        .option("maxOffsetsPerTrigger", "50") \
-        .option("kafka.max.poll.records", "10") \
+        .option("maxOffsetsPerTrigger", "1000") \
+        .option("kafka.max.poll.records", "500") \
         .option("kafka.fetch.min.bytes", "1") \
         .option("kafka.fetch.max.wait.ms", "500") \
         .load()
@@ -125,17 +133,17 @@ def save_to_elasticsearch(df, index_name):
         .option("es.resource", index_name) \
         .option("es.mapping.id", "row_hash") \
         .option("es.nodes.wan.only", "true") \
-        .option("es.net.http.auth.user", "elastic") \
-        .option("es.net.http.auth.pass", "elastic123") \
+        .option("es.net.http.auth.user", os.getenv("ES_USERNAME")) \
+        .option("es.net.http.auth.pass", os.getenv("ES_PASSWORD")) \
         .option("es.index.auto.create", "true") \
         .option("es.mapping.date.rich", "true") \
         .option("es.net.ssl", "false") \
         .option("checkpointLocation", f"/tmp/checkpoint/{index_name}") \
-        .option("es.batch.size.entries", "10") \
-        .option("es.batch.size.bytes", "1mb") \
+        .option("es.batch.size.entries", "100") \
+        .option("es.batch.size.bytes", "5mb") \
         .option("es.batch.write.refresh", "false") \
         .outputMode("append") \
-        .trigger(processingTime="120 seconds") \
+        .trigger(processingTime="30 seconds") \
         .start()
 
 def main():
