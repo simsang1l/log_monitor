@@ -139,6 +139,13 @@
     curl -X DELETE "http://localhost:9200/ssh-log"
     ```
 
+# 데이터 집계
+1. 데이터 집계 인덱스 생성
+    ```bash
+    curl -X PUT "localhost:9200/ssh-daily-summary" -H 'Content-Type: application/json' -d @spark/ssh-daily-summary.json
+    ```
+
+
 # airflow 설정
 
 1. 경로 권한 부여
