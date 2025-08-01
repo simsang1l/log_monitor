@@ -5,6 +5,8 @@ import json
 import os
 import logging
 import dotenv
+import threading
+import time
 
 dotenv.load_dotenv('/opt/bitnami/spark/work/configs/airflow_config.env')
 
@@ -21,7 +23,7 @@ def create_spark_session():
     """Spark 세션 생성"""
     logger.info("Spark 세션을 생성합니다...")
     return SparkSession.builder \
-        .appName("KafkaToElasticsearch") \
+        .appName("SecurityMonitor") \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
         .config("spark.sql.adaptive.skewJoin.enabled", "true") \
@@ -146,10 +148,70 @@ def save_to_elasticsearch(df, index_name):
         .trigger(processingTime="30 seconds") \
         .start()
 
-def main():
-    """메인 실행 함수"""
+def detect_brute_force(df):
+    """브루트 포스 공격 탐지"""
+    logger.info("브루트 포스 탐지를 시작합니다...")
+    
+    # 실패한 로그인만 필터링
+    failed_logins = df.filter(
+        col("error_type").isin(["login failed", "invalid user"])
+    ).filter(col("ip").isNotNull())
+    
+    # 10분 윈도우로 IP별 집계
+    windowed_counts = failed_logins \
+        .withWatermark("event_time", "10 minutes") \
+        .groupBy(
+            window("event_time", "10 minutes", "5 minutes"),
+            "ip"
+        ) \
+        .agg(
+            count("*").alias("failed_attempts"),
+            collect_list("message").alias("log_messages")
+        )
+    
+    # 임계값 초과 시 알림 생성 (기본값: 5회)
+    threshold = int(os.getenv("BRUTE_FORCE_THRESHOLD", "5"))
+    alerts = windowed_counts.filter(col("failed_attempts") > threshold) \
+        .withColumn("alert_type", lit("brute_force_detected")) \
+        .withColumn("source_ip", col("ip")) \
+        .withColumn("detection_time", current_timestamp()) \
+        .withColumn("time_window_minutes", lit(10)) \
+        .withColumn("severity", lit("high")) \
+        .withColumn("threshold", lit(threshold)) \
+        .select("alert_type", "source_ip", "detection_time", "failed_attempts", "time_window_minutes", "severity", "threshold", "log_messages")
+    
+    logger.info(f"브루트 포스 탐지 완료: 임계값 {threshold}회 초과 시 알림 생성")
+    return alerts
+
+def save_alerts_to_kafka(df):
+    """알림을 Kafka로 전송"""
+    logger.info("보안 알림을 Kafka로 전송합니다...")
+    
+    # JSON 형태로 변환하여 Kafka로 전송
+    alerts_json = df.select(to_json(struct("*")).alias("value"))
+    
+    return alerts_json.writeStream \
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", "kafka1:29092,kafka2:29093,kafka3:29094") \
+        .option("topic", "security-alerts") \
+        .option("checkpointLocation", "/tmp/checkpoint/security-alerts") \
+        .outputMode("append") \
+        .trigger(processingTime="30 seconds") \
+        .start()
+
+def run_query(query, query_name):
+    """개별 쿼리를 실행하는 함수"""
     try:
-        logger.info("Kafka to Elasticsearch 파이프라인을 시작합니다...")
+        logger.info(f"{query_name} 쿼리를 시작합니다...")
+        query.awaitTermination()
+        logger.info(f"{query_name} 쿼리가 정상적으로 종료되었습니다.")
+    except Exception as e:
+        logger.error(f"{query_name} 쿼리에서 오류 발생: {str(e)}")
+
+def main():
+    """메인 실행 함수 - 병렬 처리"""
+    try:
+        logger.info("보안 모니터링 파이프라인을 시작합니다...")
         
         # Spark 세션 생성
         spark = create_spark_session()
@@ -158,23 +220,59 @@ def main():
         # 스키마 생성
         schema = create_schema()
         
-        # Kafka 스트림 처리
+        # Kafka 스트림 처리 (공통 데이터)
         processed_df = process_kafka_stream(spark, schema)
         
-        # Elasticsearch에 저장
-        query = save_to_elasticsearch(processed_df, "ssh-log")
+        # 브랜치 1: Elasticsearch에 로그 저장
+        logger.info("Elasticsearch 저장 쿼리를 준비합니다...")
+        es_query = save_to_elasticsearch(processed_df, "ssh-log")
         
-        logger.info("스트리밍 쿼리가 시작되었습니다. 종료하려면 Ctrl+C를 누르세요.")
+        # 브랜치 2: 브루트 포스 탐지 및 알림 전송
+        logger.info("브루트 포스 탐지 쿼리를 준비합니다...")
+        alerts_df = detect_brute_force(processed_df)
+        alert_query = save_alerts_to_kafka(alerts_df)
         
-        # 스트리밍 쿼리 시작
-        query.awaitTermination()
+        # 두 쿼리를 별도 스레드에서 실행
+        es_thread = threading.Thread(
+            target=run_query, 
+            args=(es_query, "Elasticsearch 저장")
+        )
+        alert_thread = threading.Thread(
+            target=run_query, 
+            args=(alert_query, "보안 알림")
+        )
         
-    except KeyboardInterrupt:
-        logger.info("사용자에 의해 애플리케이션이 중단되었습니다.")
+        # 스레드 시작
+        es_thread.start()
+        alert_thread.start()
+        
+        logger.info("모든 스트리밍 쿼리가 병렬로 시작되었습니다.")
+        logger.info("- Elasticsearch 저장: ssh-log 인덱스")
+        logger.info("- 보안 알림: security-alerts 토픽")
+        logger.info("종료하려면 Ctrl+C를 누르세요.")
+        
+        # 메인 스레드에서 모니터링
+        try:
+            while True:
+                if not es_thread.is_alive() or not alert_thread.is_alive():
+                    logger.warning("하나의 쿼리가 종료되었습니다. 애플리케이션을 종료합니다.")
+                    break
+                time.sleep(5)
+        except KeyboardInterrupt:
+            logger.info("사용자에 의해 애플리케이션을 종료합니다.")
+            
     except Exception as e:
         logger.error(f"애플리케이션 실행 중 오류가 발생했습니다: {str(e)}")
         raise
     finally:
+        # 쿼리 정리
+        if 'es_query' in locals() and es_query.isActive:
+            logger.info("Elasticsearch 쿼리를 정리합니다...")
+            es_query.stop()
+        if 'alert_query' in locals() and alert_query.isActive:
+            logger.info("보안 알림 쿼리를 정리합니다...")
+            alert_query.stop()
+        
         if 'spark' in locals():
             spark.stop()
             logger.info("Spark 세션이 종료되었습니다.")

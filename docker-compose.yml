@@ -180,7 +180,7 @@ services:
     user: root                     # 퍼미션 이슈 예방
     environment:
       - PIPELINE_WORKERS=1
-      - PIPELINE_BATCH_SIZE=50
+      - PIPELINE_BATCH_SIZE=30
       - PIPELINE_BATCH_DELAY=5
       - LS_JAVA_OPTS=-Xms512m -Xmx512m
     volumes:
@@ -235,6 +235,33 @@ services:
       - kafka3
     networks:
       - pipeline-net
+
+  # ───────── 보안 모니터링 서비스 (Spark Streaming으로 대체) ─────────
+  # security-monitor는 Spark Streaming Job으로 실행됨
+
+  # ───────── 이메일 알림 서비스 ─────────
+  email-notifier:
+    build:
+      context: ./email-notifier
+      dockerfile: Dockerfile
+    container_name: email-notifier
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka1:29092,kafka2:29093,kafka3:29094
+      - KAFKA_TOPIC_ALERTS=security-alerts
+      - EMAIL_SMTP_HOST=smtp.gmail.com
+      - EMAIL_SMTP_PORT=587
+      - EMAIL_FROM=your-email@gmail.com
+      - EMAIL_TO=admin@company.com
+      - EMAIL_PASSWORD=your-app-password
+    depends_on:
+      - kafka1
+      - kafka2
+      - kafka3
+    volumes:
+      - ./email-notifier:/app
+    networks:
+      - pipeline-net
+
   spark-worker-1:
     build:
       context: ./spark

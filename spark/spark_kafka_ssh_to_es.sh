@@ -9,7 +9,7 @@ SPARK_MASTER="spark://spark-master:7077"
 # 애플리케이션 실행
 docker exec -it spark-master spark-submit \
     --master spark://spark-master:7077 \
-    --packages "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.3,org.elasticsearch:elasticsearch-spark-30_2.12:8.13.0" \
+    --packages "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.4,org.elasticsearch:elasticsearch-spark-30_2.12:8.13.0" \
     --conf "spark.sql.adaptive.enabled=true" \
     --conf "spark.sql.adaptive.coalescePartitions.enabled=true" \
     /opt/bitnami/spark/work/spark/kafka_to_elasticsearch.py
