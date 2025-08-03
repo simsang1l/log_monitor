@@ -19,7 +19,8 @@ RUN mkdir -p /opt/bitnami/spark/work && \
     chown -R spark:spark /opt/bitnami/spark/work
 
 RUN pip install --no-cache-dir \
-    python-dotenv 
+    python-dotenv \
+    requests
 
 # spark 사용자로 전환
 USER spark

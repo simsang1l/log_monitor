@@ -5,6 +5,10 @@ import json
 import os
 import logging
 import dotenv
+import smtplib
+from email.mime.text import MIMEText
+import requests
+from requests.auth import HTTPBasicAuth
 
 dotenv.load_dotenv('/opt/bitnami/spark/work/configs/airflow_config.env')
 
@@ -12,6 +16,57 @@ ES_HOST = os.getenv('ES_HOST')
 ES_PORT = os.getenv('ES_PORT')
 ES_USERNAME = os.getenv('ES_USERNAME')
 ES_PASSWORD = os.getenv('ES_PASSWORD')
+
+# ─────────────────────────────────────────────
+#  ES 인덱스 존재 확인 및 매핑 자동 생성
+# ─────────────────────────────────────────────
+
+def ensure_es_index(index_name: str):
+    """@timestamp, event_time 등을 date 타입으로 명시한 인덱스를 생성한다."""
+    es_url = f"http://{ES_HOST}:{ES_PORT}"
+    auth = HTTPBasicAuth(ES_USERNAME, ES_PASSWORD) if ES_USERNAME else None
+    try:
+        head = requests.head(f"{es_url}/{index_name}", auth=auth, timeout=5)
+        if head.status_code == 404:
+            logger.info("Elasticsearch 인덱스가 존재하지 않아 생성합니다 → %s", index_name)
+            mapping = {
+                "mappings": {
+                    "properties": {
+                        "@timestamp":            {"type": "date"},
+                        "event_time":            {"type": "date"},
+                        "event_time_kst_iso":    {"type": "date"},
+                        "host_name":             {"type": "keyword"},
+                        "row_hash":              {"type": "keyword"},
+                        "source_path":           {"type": "keyword"},
+                        "source_file":           {"type": "keyword"},
+                        "message":               {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
+                        "log_type":              {"type": "keyword"},
+                        "log_level":             {"type": "keyword"},
+                        "error_type":            {"type": "keyword"},
+                        "user":                  {"type": "keyword"},
+                        "ip":                    {"type": "ip"},
+                        "port":                  {"type": "integer"}
+                    }
+                }
+            }
+            resp = requests.put(f"{es_url}/{index_name}", json=mapping, auth=auth, timeout=10)
+            resp.raise_for_status()
+            logger.info("Elasticsearch 인덱스 %s 가 생성되었습니다 (status=%s)", index_name, resp.status_code)
+        else:
+            logger.info("Elasticsearch 인덱스 %s 가 이미 존재합니다 (status=%s)", index_name, head.status_code)
+    except Exception as exc:
+        logger.error("Elasticsearch 인덱스 확인/생성 중 오류: %s", exc)
+        raise
+
+# 이메일·탐지 설정 (환경변수)
+MAIL_HOST = os.getenv("AIRFLOW__SMTP__SMTP_HOST")
+MAIL_PORT = int(os.getenv("MAIL_PORT", "587"))
+MAIL_USER = os.getenv("AIRFLOW__SMTP__SMTP_USER")
+MAIL_PASS = os.getenv("AIRFLOW__SMTP__SMTP_PASSWORD")
+MAIL_TO   = os.getenv("REPORT_RECIPIENTS")
+
+THRESHOLD = int(os.getenv("BF_THRESHOLD", "30"))    # 실패 횟수
+WIN_MIN   = int(os.getenv("BF_WINDOW_MIN", "10"))  # 윈도우 크기(분)
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +93,7 @@ def create_spark_session():
         .config("spark.sql.adaptive.skewJoin.skewedPartitionFactor", "5") \
         .config("spark.sql.adaptive.coalescePartitions.parallelismFirst", "false") \
         .config("spark.sql.adaptive.coalescePartitions.minPartitionSize", "1MB") \
+        .config("spark.eventLog.enabled", "false") \
         .getOrCreate()
 
 def create_schema():
@@ -71,8 +127,8 @@ def process_kafka_stream(spark, schema):
         .option("subscribe", "ssh-log") \
         .option("startingOffsets", "earliest") \
         .option("failOnDataLoss", "false") \
-        .option("maxOffsetsPerTrigger", "1000") \
-        .option("kafka.max.poll.records", "500") \
+        .option("maxOffsetsPerTrigger", "10000") \
+        .option("kafka.max.poll.records", "5000") \
         .option("kafka.fetch.min.bytes", "1") \
         .option("kafka.fetch.max.wait.ms", "500") \
         .load()
@@ -109,6 +165,8 @@ def process_kafka_stream(spark, schema):
     ).withColumn("user", regexp_extract(col("message"), r"user ([^ ]+)", 1)) \
     .withColumn("ip", regexp_extract(col("message"), r"from ([0-9.]+)", 1)) \
     .withColumn("port", regexp_extract(col("message"), r"port ([0-9]+)", 1)) \
+    .withColumn("ip",   when(trim(col("ip")) == "", None).otherwise(col("ip"))) \
+    .withColumn("port", when(trim(col("port")) == "", None).otherwise(col("port").cast("integer"))) \
     .select(
         "@timestamp", "host_name", "row_hash", "event_time", "event_time_kst_iso", "source_path", "source_file", "message", "log_type", "log_level", "error_type", "user", "ip", "port"
     )
@@ -118,6 +176,8 @@ def process_kafka_stream(spark, schema):
         "message": "",
         "log_level": "INFO"
     })
+
+    processed_df.printSchema()
     
     logger.info("데이터 처리가 완료되었습니다.")
     return processed_df
@@ -143,8 +203,45 @@ def save_to_elasticsearch(df, index_name):
         .option("es.batch.size.bytes", "5mb") \
         .option("es.batch.write.refresh", "false") \
         .outputMode("append") \
-        .trigger(processingTime="30 seconds") \
+        .trigger(processingTime="5 seconds") \
         .start()
+
+# ─────────────────────────────────────────────
+# ❶  브루트 포스 탐지 DataFrame 생성
+def detect_brute_force(df):
+    failed = (
+        df.filter(col("error_type").isin(["login failed", "invalid user"]))
+          .filter(col("ip").isNotNull())
+    )
+    return (
+        failed.withWatermark("event_time", f"{WIN_MIN} minutes")
+              .groupBy(window("event_time", f"{WIN_MIN} minutes"), "ip")
+              .agg(count("*").alias("fail_cnt"))
+              .filter(col("fail_cnt") >= THRESHOLD)
+              .select("ip", "fail_cnt", current_timestamp().alias("detected_at"))
+    )
+# ─────────────────────────────────────────────
+# ❷  foreachBatch → 이메일 발송
+def email_alert(batch_df, _):
+    rows = batch_df.collect()
+    if not rows:
+        print("[ALERT] 탐지된 행이 없어 메일을 보내지 않습니다.")
+        return
+    print(f"[ALERT] {len(rows)}개 IP 메일 발송 시도")   # ← 추가
+    for r in rows:
+        print("   >", r.asDict())                      # ← 추가
+    body = "\n".join(
+        f"IP: {r['ip']}  실패:{r['fail_cnt']}회  탐지:{r['detected_at']}"
+        for r in rows
+    )
+    msg = MIMEText(body)
+    msg["Subject"] = "[SSH Brute-Force 경고]"
+    msg["From"], msg["To"] = MAIL_USER, MAIL_TO
+    with smtplib.SMTP(MAIL_HOST, MAIL_PORT) as s:
+        s.starttls()
+        s.login(MAIL_USER, MAIL_PASS)
+        s.send_message(msg)
+    print(f"[ALERT] ✉ {len(rows)}개 IP 메일 발송")
 
 def main():
     """메인 실행 함수"""
@@ -155,6 +252,9 @@ def main():
         spark = create_spark_session()
         logger.info("Spark 세션이 성공적으로 생성되었습니다.")
         
+        # ES 인덱스 존재 확인/생성
+        ensure_es_index("ssh-log")
+
         # 스키마 생성
         schema = create_schema()
         
@@ -162,12 +262,23 @@ def main():
         processed_df = process_kafka_stream(spark, schema)
         
         # Elasticsearch에 저장
-        query = save_to_elasticsearch(processed_df, "ssh-log")
+        es_query = save_to_elasticsearch(processed_df, "ssh-log")
         
         logger.info("스트리밍 쿼리가 시작되었습니다. 종료하려면 Ctrl+C를 누르세요.")
         
-        # 스트리밍 쿼리 시작
-        query.awaitTermination()
+        # ⓑ 브루트 포스 탐지 + 알림
+        alert_df  = detect_brute_force(processed_df)
+        alert_qry = (
+            alert_df.writeStream
+                    .foreachBatch(email_alert)
+                    .outputMode("update")
+                    .trigger(processingTime="10 seconds")
+                    .option("checkpointLocation", "/tmp/chk/bruteforce")
+                    .start()
+        )
+    
+        es_query.awaitTermination()     # ES 저장 쿼리
+        alert_qry.awaitTermination()    # 알림 쿼리
         
     except KeyboardInterrupt:
         logger.info("사용자에 의해 애플리케이션이 중단되었습니다.")

@@ -229,10 +229,15 @@ services:
     volumes:
       - ./:/opt/bitnami/spark/work
     depends_on:
-      - elasticsearch
       - kafka1
       - kafka2
       - kafka3
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8080"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 60s
     networks:
       - pipeline-net
 
@@ -243,13 +248,13 @@ services:
       dockerfile: Dockerfile.spark
     container_name: unified-security-monitor
     hostname: unified-security-monitor
-    depends_on:
-      spark-master:
-        condition: service_healthy
-      kafka1:
-        condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
+    # depends_on:
+    #   spark-master:
+    #     condition: service_healthy
+    #   kafka1:
+    #     condition: service_healthy
+    #   elasticsearch:
+    #     condition: service_healthy
     environment:
       - SPARK_MODE=client
       - SPARK_MASTER_URL=spark://spark-master:7077
@@ -303,29 +308,6 @@ services:
     command: ["python", "/app/advanced_alert_notifier.py"]
     restart: unless-stopped
 
-  # ───────── 기존 이메일 알림 서비스 (백업용) ─────────
-  # email-notifier:
-  #   build:
-  #     context: ./email-notifier
-  #     dockerfile: Dockerfile
-  #   container_name: email-notifier
-  #   environment:
-  #     - KAFKA_BOOTSTRAP_SERVERS=kafka1:29092,kafka2:29093,kafka3:29094
-  #     - KAFKA_TOPIC_ALERTS=security-alerts
-  #     - EMAIL_SMTP_HOST=smtp.gmail.com
-  #     - EMAIL_SMTP_PORT=587
-  #     - EMAIL_FROM=your-email@gmail.com
-  #     - EMAIL_TO=admin@company.com
-  #     - EMAIL_PASSWORD=your-app-password
-  #   depends_on:
-  #     - kafka1
-  #     - kafka2
-  #     - kafka3
-  #   volumes:
-  #     - ./email-notifier:/app
-  #   networks:
-  #     - pipeline-net
-
   spark-worker-1:
     build:
       context: ./spark
@@ -351,83 +333,83 @@ services:
     networks:
       - pipeline-net
 
-  # airflow-db:
-  #   image: postgres:16
-  #   container_name: airflow-db
-  #   environment:
-  #     POSTGRES_USER: airflow
-  #     POSTGRES_PASSWORD: airflow
-  #     POSTGRES_DB: airflow
-  #   volumes: [airflow-db:/var/lib/postgresql/data]
-  #   networks:
-  #     - pipeline-net
+  airflow-db:
+    image: postgres:16
+    container_name: airflow-db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes: [airflow-db:/var/lib/postgresql/data]
+    networks:
+      - pipeline-net
 
-  # airflow-init:
-  #   build:
-  #     context: ./airflow
-  #     dockerfile: Dockerfile.airflow
-  #   container_name: airflow-init
-  #   depends_on:
-  #     - airflow-db
-  #   environment:
-  #     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-  #     - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
-  #     - AIRFLOW__CORE__LOAD_EXAMPLES=false
-  #     - _AIRFLOW_DB_UPGRADE=true
-  #     - _AIRFLOW_WWW_USER_CREATE=true
-  #     - _AIRFLOW_WWW_USER_USERNAME=admin
-  #     - _AIRFLOW_WWW_USER_PASSWORD=admin
-  #   command: version
-  #   networks:
-  #     - pipeline-net
+  airflow-init:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-init
+    depends_on:
+      - airflow-db
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - _AIRFLOW_DB_UPGRADE=true
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=admin
+    command: version
+    networks:
+      - pipeline-net
       
-  # airflow-web:
-  #   build:
-  #     context: ./airflow
-  #     dockerfile: Dockerfile.airflow
-  #   container_name: airflow-web
-  #   command: webserver
-  #   environment:
-  #     AIRFLOW__CORE__EXECUTOR: LocalExecutor
-  #     AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
-  #     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-  #   env_file:
-  #     - configs/airflow_config.env
-  #   depends_on: [airflow-db]
-  #   ports: ["8081:8080"]
-  #   volumes:
-  #     - ./airflow/dags:/opt/airflow/dags
-  #     - ./airflow/logs:/opt/airflow/logs
-  #     - ./utils:/opt/airflow/utils
-  #     - ./spark:/opt/airflow/spark
-  #     - /var/run/docker.sock:/var/run/docker.sock
-  #   user: "50000:999"
-  #   group_add:
-  #     - "1001" 
-  #   networks:
-  #     - pipeline-net
+  airflow-web:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-web
+    command: webserver
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    env_file:
+      - configs/airflow_config.env
+    depends_on: [airflow-db]
+    ports: ["8081:8080"]
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./utils:/opt/airflow/utils
+      - ./spark:/opt/airflow/spark
+      - /var/run/docker.sock:/var/run/docker.sock
+    user: "50000:999"
+    group_add:
+      - "1001" 
+    networks:
+      - pipeline-net
 
-  # airflow-scheduler:
-  #   build:
-  #     context: ./airflow
-  #     dockerfile: Dockerfile.airflow
-  #   container_name: airflow-scheduler
-  #   command: scheduler
-  #   environment:
-  #     AIRFLOW__CORE__EXECUTOR: LocalExecutor
-  #     AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
-  #     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-  #   env_file:
-  #     - configs/airflow_config.env
-  #   depends_on: [airflow-web]
-  #   volumes:
-  #     - ./airflow/dags:/opt/airflow/dags
-  #     - ./airflow/logs:/opt/airflow/logs
-  #     - ./utils:/opt/airflow/utils
-  #     - ./spark:/opt/airflow/spark
-  #     - /var/run/docker.sock:/var/run/docker.sock
-  #   user: "50000:999"
-  #   group_add:
-  #     - "1001" 
-  #   networks:
-  #     - pipeline-net
+  airflow-scheduler:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-scheduler
+    command: scheduler
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    env_file:
+      - configs/airflow_config.env
+    depends_on: [airflow-web]
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./utils:/opt/airflow/utils
+      - ./spark:/opt/airflow/spark
+      - /var/run/docker.sock:/var/run/docker.sock
+    user: "50000:999"
+    group_add:
+      - "1001" 
+    networks:
+      - pipeline-net
