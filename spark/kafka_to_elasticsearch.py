@@ -266,19 +266,19 @@ def main():
         
         logger.info("스트리밍 쿼리가 시작되었습니다. 종료하려면 Ctrl+C를 누르세요.")
         
-        # # 브루트 포스 탐지 + 알림
-        # alert_df  = detect_brute_force(processed_df)
-        # alert_qry = (
-        #     alert_df.writeStream
-        #             .foreachBatch(email_alert)
-        #             .outputMode("update")
-        #             .trigger(processingTime="5 seconds")
-        #             .option("checkpointLocation", "/tmp/chk/bruteforce")
-        #             .start()
-        # )
+        # 브루트 포스 탐지 + 알림
+        alert_df  = detect_brute_force(processed_df)
+        alert_qry = (
+            alert_df.writeStream
+                    .foreachBatch(email_alert)
+                    .outputMode("update")
+                    .trigger(processingTime="5 seconds")
+                    .option("checkpointLocation", "/tmp/chk/bruteforce")
+                    .start()
+        )
     
         es_query.awaitTermination()     # ES 저장 쿼리
-        # alert_qry.awaitTermination()    # 알림 쿼리
+        alert_qry.awaitTermination()    # 알림 쿼리
         
     except KeyboardInterrupt:
         logger.info("사용자에 의해 애플리케이션이 중단되었습니다.")
