@@ -174,3 +174,8 @@ $ ./spark/spark_kafka_ssh_to_es.sh
 
 # 4) Kibana ▶ http://localhost:5601  대시보드 확인
 ```
+
+## 향후 개선 사항
+- 여러 서버의 log데이터 및 log종류 확장
+- 비정상 이메일 탐지 호출 로직 개선
+- 시각화 기반 alert
