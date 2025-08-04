@@ -100,11 +100,11 @@ def create_schema():
     """로그 데이터 스키마 정의"""
     logger.info("로그 데이터 스키마를 정의합니다...")
     return StructType([
-        StructField("@timestamp", StringType(), True),
+        StructField("@timestamp", TimestampType(), True),
         StructField("host_name", StringType(), True),
         StructField("row_hash", StringType(), True),
-        StructField("event_time", StringType(), True),
-        StructField("event_time_kst_iso", StringType(), True),
+        StructField("event_time", TimestampType(), True),
+        StructField("event_time_kst_iso", TimestampType(), True),
         StructField("source_path", StringType(), True),
         StructField("source_file", StringType(), True),
         StructField("message", StringType(), True),
@@ -128,7 +128,7 @@ def process_kafka_stream(spark, schema):
         .option("startingOffsets", "earliest") \
         .option("failOnDataLoss", "false") \
         .option("maxOffsetsPerTrigger", "10000") \
-        .option("kafka.max.poll.records", "5000") \
+        .option("kafka.max.poll.records", "2000") \
         .option("kafka.fetch.min.bytes", "1") \
         .option("kafka.fetch.max.wait.ms", "500") \
         .load()
@@ -266,19 +266,19 @@ def main():
         
         logger.info("스트리밍 쿼리가 시작되었습니다. 종료하려면 Ctrl+C를 누르세요.")
         
-        # ⓑ 브루트 포스 탐지 + 알림
-        alert_df  = detect_brute_force(processed_df)
-        alert_qry = (
-            alert_df.writeStream
-                    .foreachBatch(email_alert)
-                    .outputMode("update")
-                    .trigger(processingTime="10 seconds")
-                    .option("checkpointLocation", "/tmp/chk/bruteforce")
-                    .start()
-        )
+        # # 브루트 포스 탐지 + 알림
+        # alert_df  = detect_brute_force(processed_df)
+        # alert_qry = (
+        #     alert_df.writeStream
+        #             .foreachBatch(email_alert)
+        #             .outputMode("update")
+        #             .trigger(processingTime="5 seconds")
+        #             .option("checkpointLocation", "/tmp/chk/bruteforce")
+        #             .start()
+        # )
     
         es_query.awaitTermination()     # ES 저장 쿼리
-        alert_qry.awaitTermination()    # 알림 쿼리
+        # alert_qry.awaitTermination()    # 알림 쿼리
         
     except KeyboardInterrupt:
         logger.info("사용자에 의해 애플리케이션이 중단되었습니다.")

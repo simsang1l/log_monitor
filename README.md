@@ -27,7 +27,7 @@
 ## 데이터셋
 - **OpenSSH** 서버 로그 (형식: `/var/log/auth.log`)
 - 샘플 데이터: [loghub/OpenSSH](https://github.com/logpai/loghub)
-- 추후 사내 서버 로그로 확장 예정
+- SSH로 접근한 모든 내역, 연도는 임의 생성
 ```bash
 Dec 10 06:55:46 LabSZ sshd[24200]: reverse mapping checking getaddrinfo for ns.marryaldkfaczcz.com [173.234.31.186] failed - POSSIBLE BREAK-IN ATTEMPT!
 Dec 10 06:55:46 LabSZ sshd[24200]: Invalid user webmaster from 173.234.31.186
@@ -41,6 +41,13 @@ Dec 10 06:55:46 LabSZ sshd[24200]: input_userauth_request: invalid user webmaste
 | 2 | Grok & Ruby Filter | 타임스탬프 변환, 필드 추출, fingerprint(`row_hash`) 생성 |
 | 3 | Kafka Output | `ssh-log` 토픽(JSON)으로 전송 |
 
+## 기술 사용 이유
+| 기술 | 선정 이유 |
+| --- | --- |
+| **ELK Stack** | - 로그 수집·저장·시각화를 위한 통합 솔루션<br>- Logstash의 강력한 로그 파싱 기능<br>- Elasticsearch의 빠른 검색과 집계<br>- Kibana의 직관적인 대시보드 |
+| **Apache Kafka** | - 높은 처리량과 낮은 지연시간<br>- 메시지 영속성과 안정성<br>- 파티셔닝을 통한 병렬처리<br>- 장애 복구와 고가용성 |
+| **Apache Spark** | - 대용량 데이터의 병렬 처리<br>- Structured Streaming으로 실시간 처리<br>- 메모리 기반 빠른 연산 속도<br>- SQL, ML 등 다양한 라이브러리 |
+
 ## Kafka 구성
 | 항목 | 설정값 | 설명 |
 | --- | --- | --- |
@@ -49,6 +56,9 @@ Dec 10 06:55:46 LabSZ sshd[24200]: input_userauth_request: invalid user webmaste
 | **복제 계수** | 3 | 데이터 안정성을 위한 복제본 수 |
 | **메시지 키** | `row_hash` | 중복 방지를 위한 고유 식별자, `source_path + event_time + message` 조합 |
 | **데이터 형식** | JSON | Logstash에서 전송하는 구조화된 로그 데이터 |
+
+**ssh-log 예시**
+![ssh-log 예시](./kafka_message.png)
 
 ## 데이터 처리 (Spark)
 
@@ -75,10 +85,6 @@ Dec 10 06:55:46 LabSZ sshd[24200]: input_userauth_request: invalid user webmaste
 | **Shuffle Partitions** | 1 | 단일 노드 최적화 |
 | **Max Offsets Per Trigger** | 10000 | 배치 크기 제한 |
 
-### 확장성
-- **수평 확장**: Worker 노드 추가로 처리량 선형 증가
-- **메모리 확장**: Worker Memory 증가로 대용량 데이터 처리 가능
-- **코어 확장**: Worker Cores 증가로 병렬 처리 성능 향상
 
 ## 데이터 저장 (Elasticsearch)
 | 인덱스 | 기능 |
@@ -124,19 +130,18 @@ Dec 10 06:55:46 LabSZ sshd[24200]: input_userauth_request: invalid user webmaste
 ## 장애 처리 및 운영
 
 ### 장애 처리 전략
-| 컴포넌트 | 장애 유형 | 처리 방법 | 복구 시간 |
-| --- | --- | --- | --- |
-| **Kafka** | 브로커 장애 | `replication.factor=3`, `min.insync.replicas=2` | 30초 내 자동 복구 |
-| **Spark** | 애플리케이션 장애 | 체크포인트 기반 재시작, `es.mapping.id=row_hash` | 1-2분 |
-| **Logstash** | 프로세스 장애 | sincedb 기반 오프셋 복구 | 즉시 재시작 |
-| **Elasticsearch** | 노드 장애 | 단일 노드 구성, 데이터 백업 | 1-3분 |
+| 컴포넌트 | 장애 유형 | 처리 방법 |
+| --- | --- | --- |
+| **Kafka** | 브로커 장애 | `replication.factor=3`, `min.insync.replicas=2` |
+| **Spark** | 애플리케이션 장애 | 체크포인트 기반 재시작, `es.mapping.id=row_hash` |
+| **Logstash** | 프로세스 장애 | sincedb 기반 오프셋 복구 |
+| **Elasticsearch** | 노드 장애 | 단일 노드 구성, 데이터 백업 |
 
 ### Retry 전략
 | 서비스 | 재시도 횟수 | 간격 | 백오프 |
 | --- | --- | --- | --- |
 | **Airflow DAG** | 1회 | 5분 | 고정 |
 | **Spark Streaming** | 무한 | 즉시 | 체크포인트 기반 |
-| **Email 발송** | 3회 | 10초 | 지수 백오프 |
 
 ### 알림 전송
 - **실시간 알림**: 브루트포스 탐지 시 즉시 SMTP 발송
@@ -150,21 +155,10 @@ Dec 10 06:55:46 LabSZ sshd[24200]: input_userauth_request: invalid user webmaste
 - **메트릭 수집**: Kafka lag, Elasticsearch 성능 지표
 
 ## 성능 및 테스트
-
-### 현재 성능 지표
 | 지표 | 값 | 설명 |
 | --- | --- | --- |
-| **처리 지연시간** | 5초 | Spark 마이크로 배치 간격 |
-| **메모리 사용량** | 1GB | Spark 워커 메모리 |
-| **체크포인트 크기** | ~100MB | 스트리밍 상태 저장 |
+| **logstash 처리 시간** | 71.8초 | 655,147개 이벤트 kafka로 보내는데 걸린 시간(초당 약 9000개) |
 
-### 개선 방안
-| 영역 | 현재 | 개선안 | 예상 효과 |
-| --- | --- | --- | --- |
-| **처리 성능** | 단일 워커 | 멀티 워커 확장 | 2-3배 처리량 증가 |
-| **메모리 최적화** | 1GB 고정 | 동적 메모리 할당 | 리소스 효율성 향상 |
-| **장애 복구** | 수동 재시작 | 자동 재시작 스크립트 | 다운타임 50% 감소 |
-| **모니터링** | 기본 로그 | Prometheus + Grafana | 실시간 알림 강화 |
 
 ## 데모
 ```bash

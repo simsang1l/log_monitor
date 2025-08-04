@@ -20,7 +20,9 @@ RUN mkdir -p /opt/bitnami/spark/work && \
 
 RUN pip install --no-cache-dir \
     python-dotenv \
-    requests
+    requests \
+    smtplib \
+    email
 
 # spark 사용자로 전환
 USER spark

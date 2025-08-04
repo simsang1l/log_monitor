@@ -134,9 +134,13 @@
     curl -X GET "http://localhost:9200/ssh-log/_count"
     ```
 
-5. elasticsearch 데이터 삭제
+5. elasticsearch 인덱스 삭제
     ```bash
     curl -X DELETE "http://localhost:9200/ssh-log"
+    ```
+6. 통계량 보기
+    ```bash
+    curl -X GET "http://localhost:9600/_node/stats/pipelines?pretty"
     ```
 
 # 데이터 집계
