@@ -22,22 +22,6 @@ docker exec -it kafka1 kafka-topics --create \
     --partitions 3 \
     --replication-factor 3
 
-# 보안 모니터링용 별도 토픽 생성
-echo "🔒 ssh-log-security 토픽 생성 (보안 모니터링용)..."
-docker exec -it kafka1 kafka-topics --create \
-    --topic ssh-log-security \
-    --bootstrap-server kafka1:29092 \
-    --partitions 3 \
-    --replication-factor 3
-
-# 보안 알림 토픽 생성
-echo "🚨 security-alerts 토픽 생성 (보안 알림용)..."
-docker exec -it kafka1 kafka-topics --create \
-    --topic security-alerts \
-    --bootstrap-server kafka1:29092 \
-    --partitions 3 \
-    --replication-factor 3
-
 echo "✅ 모든 토픽이 생성되었습니다."
 
 # 토픽 목록 확인

@@ -65,8 +65,8 @@ MAIL_USER = os.getenv("AIRFLOW__SMTP__SMTP_USER")
 MAIL_PASS = os.getenv("AIRFLOW__SMTP__SMTP_PASSWORD")
 MAIL_TO   = os.getenv("REPORT_RECIPIENTS")
 
-THRESHOLD = int(os.getenv("BF_THRESHOLD", "30"))    # 실패 횟수
-WIN_MIN   = int(os.getenv("BF_WINDOW_MIN", "10"))  # 윈도우 크기(분)
+THRESHOLD = int(os.getenv("BF_THRESHOLD", "60"))    # 실패 횟수
+WIN_MIN   = int(os.getenv("BF_WINDOW_MIN", "1"))  # 윈도우 크기(분)
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
